@@ -1,641 +1,1180 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import {
-  ArrowDownLeft,
-  ArrowUpRight,
   Bell,
   BookOpen,
-  CalendarDays,
   Check,
   ChevronDown,
   CircleDollarSign,
-  Clock3,
-  Coins,
-  CreditCard,
+  Download,
+  FileText,
   HandCoins,
-  Landmark,
   LayoutDashboard,
   Menu,
-  Plus,
   Search,
   ShieldCheck,
+  Upload,
+  UserRoundCog,
   UsersRound,
   Wallet,
   X,
 } from "lucide-react";
 
-type AttendanceStatus = "Present" | "Absent" | "On Leave";
-type AttendanceMap = Record<string, Record<string, AttendanceStatus>>;
-type Staff = {
+type ViewName =
+  | "dashboard"
+  | "students"
+  | "admissions"
+  | "classes"
+  | "subjects"
+  | "routine"
+  | "staff"
+  | "payroll"
+  | "fees"
+  | "donations"
+  | "reports"
+  | "users"
+  | "settings"
+  | "idcards"
+  | "notices"
+  | "backup";
+
+type ThemeConfig = {
+  primary: string;
+  secondary: string;
+  accent: string;
+  bg: string;
+  panel: string;
+  text: string;
+};
+
+type Student = {
   id: string;
   name: string;
-  title: string;
-  department: string;
-  joined: string;
-  initials: string;
-  color: string;
+  className: string;
+  section: string;
+  gender: "Male" | "Female";
+  roll: number;
+  status: "Active" | "Inactive" | "Graduated";
+  fee: number;
+  due: number;
+  phone: string;
+  parentId: string;
+  photo: string;
+  dateJoined: string;
 };
-type ApprovedLeave = {
-  id: string;
-  staffId: string;
-  startDate: string;
-  endDate: string;
-  reason: string;
-};
-type StaffLoan = {
-  id: string;
-  staffId: string;
-  kind: "Advance" | "Staff loan";
-  amount: number;
-  repaid: number;
-  issueDate: string;
-  monthlyDeduction: number;
-  note: string;
-};
-type InstituteLoan = {
-  id: string;
-  lender: string;
-  purpose: string;
-  principal: number;
-  principalRepaid: number;
-  interestRate: number;
-  termMonths: number;
-  startDate: string;
-  interestPaid: number;
-};
-type Store = {
-  attendance: AttendanceMap;
-  approvedLeaves: ApprovedLeave[];
-  staffLoans: StaffLoan[];
-  instituteLoans: InstituteLoan[];
-};
-type ModalKind = "leave" | "staff-loan" | "staff-payment" | "institute-loan" | "institute-payment" | null;
-type IconType = typeof UsersRound;
 
-const STORAGE_KEY = "madrasa-hr-demo-v1";
-const STAFF: Staff[] = [
-  { id: "EMP-101", name: "Abdul Karim", title: "Senior Teacher", department: "Quran", joined: "2021-01-12", initials: "AK", color: "mint" },
-  { id: "EMP-102", name: "Ayesha Rahman", title: "Arabic Teacher", department: "Academic", joined: "2022-03-08", initials: "AR", color: "rose" },
-  { id: "EMP-103", name: "Mahmud Hasan", title: "Accountant", department: "Finance", joined: "2020-07-20", initials: "MH", color: "blue" },
-  { id: "EMP-104", name: "Fatima Sultana", title: "Hifz Teacher", department: "Hifz", joined: "2023-02-01", initials: "FS", color: "lavender" },
-  { id: "EMP-105", name: "Rafiq Uddin", title: "Office Assistant", department: "Administration", joined: "2024-06-15", initials: "RU", color: "amber" },
-  { id: "EMP-106", name: "Nusrat Jahan", title: "Science Teacher", department: "Academic", joined: "2023-09-10", initials: "NJ", color: "teal" },
+type ParentRecord = { id: string; name: string; phone: string; relation: string; };
+type Staff = { id: string; name: string; role: string; status: "Active" | "Inactive"; phone: string; };
+type Donation = { id: string; donor: string; fund: string; amount: number; date: string; method: string; };
+type Invoice = { id: string; studentId: string; month: string; due: number; paid: number; status: "Paid" | "Partial" | "Due"; };
+type Notice = { id: string; title: string; type: "General" | "Academic" | "Fee"; date: string; };
+type UserAccount = { id: string; name: string; role: string; status: "Active" | "Pending"; lastLogin: string; };
+type NavGroup = { id: string; label: string; icon: any; items: { id: ViewName; label: string; badge?: number }[] };
+type TemplateOption = { id: string; name: string; accent: string; };
+type ThemeKey = "emerald" | "royal" | "sunset";
+type StudentFormState = {
+  id: string;
+  name: string;
+  className: Student["className"];
+  section: string;
+  gender: Student["gender"];
+  roll: number;
+  fee: number;
+  due: number;
+  phone: string;
+  parentId: string;
+  status: Student["status"];
+  photo: string;
+};
+
+const defaultTheme: ThemeConfig = {
+  primary: "#0d4b3a",
+  secondary: "#d9b66d",
+  accent: "#1f7a5f",
+  bg: "#f5f7f2",
+  panel: "#ffffff",
+  text: "#1c2d28",
+};
+
+const themePresets: Record<ThemeKey, ThemeConfig> = {
+  emerald: defaultTheme,
+  royal: { primary: "#1d3563", secondary: "#d4ba8a", accent: "#3f6bb3", bg: "#eef3f9", panel: "#ffffff", text: "#1a2738" },
+  sunset: { primary: "#5d2a29", secondary: "#e5b46a", accent: "#a85f45", bg: "#fff7f1", panel: "#fffdfb", text: "#2a1d1c" },
+};
+
+const NAV_GROUPS: NavGroup[] = [
+  { id: "overview", label: "Overview", icon: LayoutDashboard, items: [{ id: "dashboard", label: "Dashboard" }, { id: "notices", label: "Notices" }] },
+  { id: "academic", label: "Academic", icon: BookOpen, items: [{ id: "students", label: "Students" }, { id: "admissions", label: "Admissions" }, { id: "classes", label: "Classes" }, { id: "subjects", label: "Subjects" }, { id: "routine", label: "Routine" }, { id: "idcards", label: "ID Cards" }] },
+  { id: "hr", label: "HR & Payroll", icon: UsersRound, items: [{ id: "staff", label: "Staff" }, { id: "payroll", label: "Payroll" }] },
+  { id: "accounting", label: "Accounting", icon: CircleDollarSign, items: [{ id: "fees", label: "Fees" }, { id: "donations", label: "Donations" }] },
+  { id: "reports", label: "Reports", icon: FileText, items: [{ id: "reports", label: "Reports" }] },
+  { id: "admin", label: "Administration", icon: UserRoundCog, items: [{ id: "users", label: "Users" }, { id: "settings", label: "Settings" }, { id: "backup", label: "Backup" }] },
 ];
 
-function localDate(date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
+const initialParents: ParentRecord[] = [
+  { id: "P-001", name: "Rahman Ali", phone: "01712345678", relation: "Father" },
+  { id: "P-002", name: "Nusrat Begum", phone: "01823456789", relation: "Mother" },
+  { id: "P-003", name: "Kamal Hossain", phone: "01934567890", relation: "Guardian" },
+  { id: "P-004", name: "Sultana Akter", phone: "01645678901", relation: "Mother" },
+];
 
-function seedStore(): Store {
-  return {
-    attendance: {},
-    approvedLeaves: [],
-    staffLoans: [
-      { id: "SL-2401", staffId: "EMP-101", kind: "Advance", amount: 12000, repaid: 4000, issueDate: "2025-11-02", monthlyDeduction: 2000, note: "Salary advance" },
-      { id: "SL-2402", staffId: "EMP-104", kind: "Staff loan", amount: 30000, repaid: 10000, issueDate: "2025-10-15", monthlyDeduction: 2500, note: "Personal loan" },
-      { id: "SL-2403", staffId: "EMP-103", kind: "Advance", amount: 8000, repaid: 8000, issueDate: "2025-08-03", monthlyDeduction: 2000, note: "Completed" },
-    ],
-    instituteLoans: [
-      { id: "IL-2025-01", lender: "Al Noor Cooperative", purpose: "Library & classroom expansion", principal: 1500000, principalRepaid: 250000, interestRate: 6, termMonths: 36, startDate: "2025-07-01", interestPaid: 18000 },
-    ],
-  };
-}
+const initialStudents: Student[] = [
+  { id: "THM-2025-001", name: "Ayesha Rahman", className: "Play", section: "A", gender: "Female", roll: 1, status: "Active", fee: 2500, due: 0, phone: "01710000001", parentId: "P-001", photo: "AR", dateJoined: "2024-01-12" },
+  { id: "THM-2025-002", name: "Imran Hossain", className: "Nursery", section: "A", gender: "Male", roll: 4, status: "Active", fee: 3000, due: 1200, phone: "01710000002", parentId: "P-002", photo: "IH", dateJoined: "2024-02-18" },
+  { id: "THM-2025-003", name: "Mariam Sultana", className: "One", section: "B", gender: "Female", roll: 2, status: "Active", fee: 3500, due: 0, phone: "01710000003", parentId: "P-003", dateJoined: "2024-03-06", photo: "MS" },
+  { id: "THM-2025-004", name: "Rafiul Karim", className: "Two", section: "A", gender: "Male", roll: 1, status: "Inactive", fee: 4000, due: 0, phone: "01710000004", parentId: "P-004", photo: "RK", dateJoined: "2023-11-21" },
+  { id: "THM-2025-005", name: "Sadia Akter", className: "Three", section: "A", gender: "Female", roll: 3, status: "Active", fee: 4500, due: 1600, phone: "01710000005", parentId: "P-002", photo: "SA", dateJoined: "2023-10-09" },
+];
 
-function loadStore(): Store {
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  if (!raw) return seedStore();
-  const saved = JSON.parse(raw) as Partial<Store>;
-  const defaults = seedStore();
-  return {
-    attendance: saved.attendance ?? defaults.attendance,
-    approvedLeaves: saved.approvedLeaves ?? defaults.approvedLeaves,
-    staffLoans: saved.staffLoans ?? defaults.staffLoans,
-    instituteLoans: saved.instituteLoans ?? defaults.instituteLoans,
-  };
-}
+const initialDonations: Donation[] = [
+  { id: "D-1001", donor: "Habibur Rahman", fund: "General", amount: 15000, date: "2025-11-01", method: "bKash" },
+  { id: "D-1002", donor: "Amina Sultana", fund: "Zakat", amount: 22000, date: "2025-11-02", method: "Bank" },
+  { id: "D-1003", donor: "Tafsir Foundation", fund: "Sadaqah", amount: 18000, date: "2025-11-04", method: "Cash" },
+];
 
-function money(amount: number): string {
-  return new Intl.NumberFormat("en-BD", {
-    style: "currency",
-    currency: "BDT",
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
+const initialInvoices: Invoice[] = [
+  { id: "INV-2025-001", studentId: "THM-2025-001", month: "2025-11", due: 2500, paid: 2500, status: "Paid" },
+  { id: "INV-2025-002", studentId: "THM-2025-002", month: "2025-11", due: 3000, paid: 1800, status: "Partial" },
+  { id: "INV-2025-003", studentId: "THM-2025-003", month: "2025-11", due: 3500, paid: 0, status: "Due" },
+  { id: "INV-2025-004", studentId: "THM-2025-005", month: "2025-11", due: 4500, paid: 0, status: "Due" },
+];
 
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat("en", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${value}T00:00:00`));
-}
+const initialNotices: Notice[] = [
+  { id: "N-01", title: "Term exam routine published", type: "Academic", date: "2025-11-06" },
+  { id: "N-02", title: "Fee submission deadline", type: "Fee", date: "2025-11-08" },
+  { id: "N-03", title: "Winter vacation notice", type: "General", date: "2025-11-10" },
+];
 
-function getStatusForDate(store: Store, staffId: string, date: string, autoLeave: boolean): AttendanceStatus {
-  if (autoLeave && store.approvedLeaves.some((leave) => leave.staffId === staffId && leave.startDate <= date && leave.endDate >= date)) {
-    return "On Leave";
+const initialUsers: UserAccount[] = [
+  { id: "U-0001", name: "Tanvir Ahmed", role: "Super Admin", status: "Active", lastLogin: "2025-11-6 08:03" },
+  { id: "U-0002", name: "Sabiha Hasan", role: "Accountant", status: "Active", lastLogin: "2025-11-5 17:12" },
+  { id: "U-0003", name: "Rahima Khatun", role: "Teacher", status: "Pending", lastLogin: "2025-11-4 12:21" },
+];
+
+const templateOptions: TemplateOption[] = [
+  { id: "classic", name: "Classic", accent: "#0b4b3a" },
+  { id: "modern", name: "Modern", accent: "#2d765d" },
+  { id: "minimal", name: "Minimal", accent: "#5f6b3b" },
+  { id: "royal", name: "Royal", accent: "#6d4a2d" },
+];
+
+const classFeeMap: Record<string, number> = { Play: 2500, Nursery: 3000, One: 3500, Two: 4000, Three: 4500 };
+
+function loadStored<T>(key: string, fallback: T): T {
+  try {
+    const saved = localStorage.getItem(key);
+    return saved ? (JSON.parse(saved) as T) : fallback;
+  } catch {
+    return fallback;
   }
-  return store.attendance[date]?.[staffId] ?? "Present";
 }
 
-function initials(name: string): string {
-  return name.split(" ").map((part) => part[0]).slice(0, 2).join("").toUpperCase();
+function formatBDT(value: number): string {
+  return new Intl.NumberFormat("en-BD", { style: "currency", currency: "BDT", maximumFractionDigits: 0 }).format(value);
+}
+
+function safeDate(date: string): string {
+  return date ? new Intl.DateTimeFormat("en-BD", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(date)) : "—";
+}
+
+function nextStudentId(): string {
+  const year = new Date().getFullYear();
+  const existing = loadStored<Student[]>("madrasa_students", initialStudents);
+  const count = existing.filter((student) => student.id.startsWith(`THM-${year}-`)).length + 1;
+  return `THM-${year}-${String(count).padStart(3, "0")}`;
 }
 
 function App() {
-  const [store, setStore] = useState<Store>(loadStore);
-  const [section, setSection] = useState<"attendance" | "staffLoans" | "instituteLoans">("attendance");
-  const [attendanceDate, setAttendanceDate] = useState(localDate());
-  const [autoLeave, setAutoLeave] = useState(true);
-  const [search, setSearch] = useState("");
-  const [modal, setModal] = useState<ModalKind>(null);
-  const [selectedId, setSelectedId] = useState("");
-  const [toast, setToast] = useState("");
+  const [theme, setTheme] = useState<ThemeConfig>(() => ({ ...loadStored<ThemeConfig>("madrasa_theme", defaultTheme) }));
+  const [activeView, setActiveView] = useState<ViewName>("dashboard");
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({ overview: true, academic: true, hr: true, accounting: true, reports: true, admin: true });
+  const [students, setStudents] = useState<Student[]>(() => loadStored<Student[]>("madrasa_students", initialStudents));
+  const [parents, setParents] = useState<ParentRecord[]>(() => loadStored<ParentRecord[]>("madrasa_parents", initialParents));
+  const [staff] = useState<Staff[]>(() => loadStored<Staff[]>("madrasa_staff", []));
+  const [donations, setDonations] = useState<Donation[]>(() => loadStored<Donation[]>("madrasa_donations", initialDonations));
+  const [invoices, setInvoices] = useState<Invoice[]>(() => loadStored<Invoice[]>("madrasa_invoices", initialInvoices));
+  const [notices, setNotices] = useState<Notice[]>(() => loadStored<Notice[]>("madrasa_notices", initialNotices));
+  const [users, setUsers] = useState<UserAccount[]>(() => loadStored<UserAccount[]>("madrasa_users", initialUsers));
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [selectedStudentId, setSelectedStudentId] = useState<string>(initialStudents[0].id);
+  const [template, setTemplate] = useState<string>("classic");
+  const [customTemplateUrl, setCustomTemplateUrl] = useState<string>("");
+  const [selectedIdCards, setSelectedIdCards] = useState<string[]>([initialStudents[0].id]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [studentForm, setStudentForm] = useState<StudentFormState>({
+    id: "",
+    name: "",
+    className: "Play",
+    section: "A",
+    gender: "Male",
+    roll: 1,
+    fee: classFeeMap.Play,
+    due: 0,
+    phone: "",
+    parentId: parents[0]?.id ?? "",
+    status: "Active",
+    photo: "",
+  });
+  const [showStudentModal, setShowStudentModal] = useState(false);
+  const [printDoc, setPrintDoc] = useState<null | "receipt" | "report" | "invoice">(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
-  }, [store]);
+    document.documentElement.style.setProperty("--primary", theme.primary);
+    document.documentElement.style.setProperty("--secondary", theme.secondary);
+    document.documentElement.style.setProperty("--accent", theme.accent);
+    document.documentElement.style.setProperty("--bg", theme.bg);
+    document.documentElement.style.setProperty("--panel", theme.panel);
+    document.documentElement.style.setProperty("--text", theme.text);
+    localStorage.setItem("madrasa_theme", JSON.stringify(theme));
+  }, [theme]);
 
-  useEffect(() => {
-    if (!toast) return;
-    const timer = window.setTimeout(() => setToast(""), 3200);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
+  useEffect(() => { localStorage.setItem("madrasa_students", JSON.stringify(students)); }, [students]);
+  useEffect(() => { localStorage.setItem("madrasa_parents", JSON.stringify(parents)); }, [parents]);
+  useEffect(() => { localStorage.setItem("madrasa_donations", JSON.stringify(donations)); }, [donations]);
+  useEffect(() => { localStorage.setItem("madrasa_invoices", JSON.stringify(invoices)); }, [invoices]);
+  useEffect(() => { localStorage.setItem("madrasa_notices", JSON.stringify(notices)); }, [notices]);
+  useEffect(() => { localStorage.setItem("madrasa_users", JSON.stringify(users)); }, [users]);
 
-  const filteredStaff = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return STAFF.filter((person) =>
-      !query || [person.name, person.id, person.title, person.department].some((value) => value.toLowerCase().includes(query)),
-    );
-  }, [search]);
+  const filteredStudents = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return students.filter((student) => {
+      if (!query) return true;
+      const matchesText = [student.name, student.id, student.phone, student.className, student.section].join(" ").toLowerCase();
+      return matchesText.includes(query);
+    });
+  }, [students, searchQuery]);
 
-  const presentCount = STAFF.filter((person) => getStatusForDate(store, person.id, attendanceDate, autoLeave) === "Present").length;
-  const absentCount = STAFF.filter((person) => getStatusForDate(store, person.id, attendanceDate, autoLeave) === "Absent").length;
-  const leaveCount = STAFF.filter((person) => getStatusForDate(store, person.id, attendanceDate, autoLeave) === "On Leave").length;
-  const activeStaffLoans = store.staffLoans.filter((loan) => loan.amount > loan.repaid);
-  const totalStaffOutstanding = activeStaffLoans.reduce((sum, loan) => sum + loan.amount - loan.repaid, 0);
-  const totalInstituteOutstanding = store.instituteLoans.reduce((sum, loan) => sum + loan.principal - loan.principalRepaid, 0);
+  const student = students.find((entry) => entry.id === selectedStudentId) ?? students[0];
 
-  function markAttendance(staffId: string, status: "Present" | "Absent") {
-    if (autoLeave && store.approvedLeaves.some((leave) => leave.staffId === staffId && leave.startDate <= attendanceDate && leave.endDate >= attendanceDate)) {
-      setToast("Approved leave is active for this date. Turn off auto-mark to override it.");
-      return;
+  const stats = {
+    totalStudents: students.length,
+    active: students.filter((student) => student.status === "Active").length,
+    due: students.reduce((sum, student) => sum + student.due, 0),
+    donors: donations.length,
+    staffCount: staff.length,
+  };
+
+  const toggleGroup = (groupId: string) => setExpandedGroups((current) => ({ ...current, [groupId]: !current[groupId] }));
+
+  const openStudentForm = (studentItem?: Student) => {
+    if (studentItem) {
+      setStudentForm({
+        id: studentItem.id,
+        name: studentItem.name,
+        className: studentItem.className,
+        section: studentItem.section,
+        gender: studentItem.gender,
+        roll: studentItem.roll,
+        fee: studentItem.fee,
+        due: studentItem.due,
+        phone: studentItem.phone,
+        parentId: studentItem.parentId,
+        status: studentItem.status,
+        photo: studentItem.photo,
+      });
+    } else {
+      setStudentForm({
+        id: nextStudentId(),
+        name: "",
+        className: "Play",
+        section: "A",
+        gender: "Male",
+        roll: 1,
+        fee: classFeeMap.Play,
+        due: 0,
+        phone: "",
+        parentId: parents[0]?.id ?? "",
+        status: "Active",
+        photo: "",
+      });
     }
-    setStore((current) => ({
-      ...current,
-      attendance: {
-        ...current.attendance,
-        [attendanceDate]: { ...current.attendance[attendanceDate], [staffId]: status },
-      },
-    }));
-  }
+    setShowStudentModal(true);
+  };
 
-  function openModal(kind: ModalKind, id = "") {
-    setSelectedId(id);
-    setModal(kind);
-  }
-
-  function closeModal() {
-    setModal(null);
-    setSelectedId("");
-  }
-
-  function saveLeave(event: FormEvent<HTMLFormElement>) {
+  const saveStudent = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const staffId = String(form.get("staffId"));
-    const startDate = String(form.get("startDate"));
-    const endDate = String(form.get("endDate"));
-    if (endDate < startDate) {
-      setToast("The end date must be on or after the start date.");
+    if (!studentForm.name.trim() || !studentForm.phone.trim()) {
+      window.alert("Name and phone are required.");
       return;
     }
-    const overlaps = store.approvedLeaves.some((leave) => leave.staffId === staffId && startDate <= leave.endDate && endDate >= leave.startDate);
-    if (overlaps) {
-      setToast("An approved leave already overlaps those dates.");
-      return;
-    }
-    const leave: ApprovedLeave = {
-      id: `LV-${Date.now()}`,
-      staffId,
-      startDate,
-      endDate,
-      reason: String(form.get("reason")).trim(),
+
+    const nextFee = classFeeMap[studentForm.className] ?? studentForm.fee;
+    const payload: Student = {
+      id: studentForm.id || nextStudentId(),
+      name: studentForm.name.trim(),
+      className: studentForm.className,
+      section: studentForm.section,
+      gender: studentForm.gender,
+      roll: studentForm.roll,
+      fee: nextFee,
+      due: studentForm.due,
+      phone: studentForm.phone.trim(),
+      parentId: studentForm.parentId,
+      status: studentForm.status,
+      photo: studentForm.photo || studentForm.name.trim().split(" ").map((part) => part[0]).slice(0, 2).join("").toUpperCase(),
+      dateJoined: new Date().toISOString().slice(0, 10),
     };
-    setStore((current) => ({ ...current, approvedLeaves: [...current.approvedLeaves, leave] }));
-    setToast("Approved leave saved. Attendance will reflect it when auto-mark is enabled.");
-    closeModal();
-  }
 
-  function saveStaffLoan(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const amount = Number(form.get("amount"));
-    const monthlyDeduction = Number(form.get("monthlyDeduction"));
-    if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(monthlyDeduction) || monthlyDeduction < 0) {
-      setToast("Enter a valid amount and monthly deduction.");
-      return;
+    setStudents((current) => {
+      const exists = current.some((item) => item.id === payload.id);
+      if (exists) {
+        return current.map((item) => (item.id === payload.id ? payload : item));
+      }
+      return [payload, ...current];
+    });
+    setSelectedStudentId(payload.id);
+    setShowStudentModal(false);
+  };
+
+  const restoreBackup = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text) as {
+        students?: Student[];
+        parents?: ParentRecord[];
+        donations?: Donation[];
+        invoices?: Invoice[];
+        notices?: Notice[];
+        users?: UserAccount[];
+        theme?: ThemeConfig;
+      };
+      if (data.students) setStudents(data.students);
+      if (data.parents) setParents(data.parents);
+      if (data.donations) setDonations(data.donations);
+      if (data.invoices) setInvoices(data.invoices);
+      if (data.notices) setNotices(data.notices);
+      if (data.users) setUsers(data.users);
+      if (data.theme) setTheme({ ...defaultTheme, ...data.theme });
+      alert("Backup restored successfully.");
+    } catch {
+      alert("The selected file is not a valid backup.");
+    } finally {
+      event.target.value = "";
     }
-    const loan: StaffLoan = {
-      id: `SL-${Date.now()}`,
-      staffId: String(form.get("staffId")),
-      kind: String(form.get("kind")) as StaffLoan["kind"],
-      amount,
-      repaid: 0,
-      issueDate: String(form.get("issueDate")),
-      monthlyDeduction,
-      note: String(form.get("note")).trim(),
+  };
+
+  const exportBackup = () => {
+    const payload = {
+      students,
+      parents,
+      donations,
+      invoices,
+      notices,
+      users,
+      theme,
+      exportedAt: new Date().toISOString(),
     };
-    setStore((current) => ({ ...current, staffLoans: [loan, ...current.staffLoans] }));
-    setToast(`${loan.kind} recorded.`);
-    closeModal();
-  }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "tanzeemul-huda-backup.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
-  function repayStaffLoan(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const loan = store.staffLoans.find((item) => item.id === selectedId);
-    const amount = Number(new FormData(event.currentTarget).get("amount"));
-    if (!loan || !Number.isFinite(amount) || amount <= 0 || amount > loan.amount - loan.repaid) {
-      setToast("Enter a repayment greater than zero and no more than the remaining balance.");
-      return;
-    }
-    setStore((current) => ({
-      ...current,
-      staffLoans: current.staffLoans.map((item) => item.id === selectedId ? { ...item, repaid: item.repaid + amount } : item),
-    }));
-    setToast("Repayment recorded.");
-    closeModal();
-  }
+  const handleThemeChange = (key: keyof ThemeConfig, value: string) => setTheme((current) => ({ ...current, [key]: value }));
 
-  function saveInstituteLoan(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const principal = Number(form.get("principal"));
-    const interestRate = Number(form.get("interestRate"));
-    const termMonths = Number(form.get("termMonths"));
-    if (principal <= 0 || interestRate < 0 || termMonths <= 0) {
-      setToast("Enter a positive principal and term, and a valid interest rate.");
-      return;
-    }
-    const loan: InstituteLoan = {
-      id: `IL-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`,
-      lender: String(form.get("lender")).trim(),
-      purpose: String(form.get("purpose")).trim(),
-      principal,
-      principalRepaid: 0,
-      interestRate,
-      termMonths,
-      startDate: String(form.get("startDate")),
-      interestPaid: 0,
+  const printMode = (kind: "receipt" | "report" | "invoice") => {
+    setPrintDoc(kind);
+    setTimeout(() => window.print(), 120);
+  };
+
+  const applyTemplate = (selected: string) => {
+    setTemplate(selected);
+    const chosen = templateOptions.find((option) => option.id === selected);
+    if (chosen) setTheme((current) => ({ ...current, accent: chosen.accent }));
+  };
+
+  const handleFileUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setCustomTemplateUrl(reader.result);
+      }
     };
-    setStore((current) => ({ ...current, instituteLoans: [loan, ...current.instituteLoans] }));
-    setToast("Institute investment loan added.");
-    closeModal();
-  }
+    reader.readAsDataURL(file);
+  };
 
-  function repayInstituteLoan(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const loan = store.instituteLoans.find((item) => item.id === selectedId);
-    const form = new FormData(event.currentTarget);
-    const principal = Number(form.get("principal"));
-    const interest = Number(form.get("interest"));
-    if (!loan || !Number.isFinite(principal) || principal < 0 || principal > loan.principal - loan.principalRepaid || !Number.isFinite(interest) || interest < 0 || principal + interest <= 0) {
-      setToast("Enter valid principal and interest payments within the outstanding balance.");
+  const toggleIdCard = (studentId: string) => {
+    setSelectedIdCards((current) => current.includes(studentId) ? current.filter((id) => id !== studentId) : [...current, studentId]);
+  };
+
+  const batchPrintIdCards = () => {
+    if (!selectedIdCards.length) {
+      alert("Select at least one student for the ID card batch print.");
       return;
     }
-    setStore((current) => ({
-      ...current,
-      instituteLoans: current.instituteLoans.map((item) =>
-        item.id === selectedId ? { ...item, principalRepaid: item.principalRepaid + principal, interestPaid: item.interestPaid + interest } : item,
-      ),
-    }));
-    setToast("Loan payment recorded.");
-    closeModal();
-  }
+    setPrintDoc("report");
+    setTimeout(() => window.print(), 120);
+  };
 
-  const pageTitle = section === "attendance" ? "Staff attendance" : section === "staffLoans" ? "Staff advances & loans" : "Institute investment loans";
+  const isActive = (view: ViewName) => activeView === view;
 
   return (
-    <div className="app-shell">
-      {mobileMenuOpen && <button className="mobile-backdrop" aria-label="Close navigation" onClick={() => setMobileMenuOpen(false)} />}
+    <div className="app-shell" data-print-hidden="true">
+      <button className="mobile-backdrop" style={{ display: mobileMenuOpen ? "block" : "none" }} onClick={() => setMobileMenuOpen(false)} />
       <aside className={`sidebar ${mobileMenuOpen ? "sidebar-open" : ""}`}>
-        <div className="brand">
-          <div className="brand-mark"><BookOpen size={22} strokeWidth={1.8} /></div>
-          <div><strong>Darul Ilm</strong><span>Management system</span></div>
-          <button className="icon-button mobile-close" aria-label="Close menu" onClick={() => setMobileMenuOpen(false)}><X size={18} /></button>
+        <div className="brand-wrap">
+          <div className="brand-mark">ت</div>
+          <div>
+            <strong>Tanzeemul Huda</strong>
+            <span>Pre Hifz & Noorani Academy</span>
+          </div>
+          <button className="icon-button mobile-close" onClick={() => setMobileMenuOpen(false)}><X size={18} /></button>
         </div>
-        <div className="nav-caption">WORKSPACE</div>
-        <nav className="main-nav" aria-label="Main navigation">
-          <NavButton icon={LayoutDashboard} label="Overview" onClick={() => { setSection("attendance"); setMobileMenuOpen(false); }} active={false} />
-          <div className="nav-group-label">HR &amp; PAYROLL <ChevronDown size={14} /></div>
-          <NavButton icon={UsersRound} label="Staff attendance" active={section === "attendance"} onClick={() => { setSection("attendance"); setMobileMenuOpen(false); }} />
-          <NavButton icon={HandCoins} label="Advances & loans" active={section === "staffLoans"} onClick={() => { setSection("staffLoans"); setMobileMenuOpen(false); }} />
-          <NavButton icon={Landmark} label="Institute loans" active={section === "instituteLoans"} onClick={() => { setSection("instituteLoans"); setMobileMenuOpen(false); }} />
-          <div className="nav-caption nav-caption-spaced">ACADEMIC</div>
-          <NavButton icon={BookOpen} label="Classes & subjects" onClick={() => setToast("Academic management is outside this HR prototype.")} active={false} />
-          <NavButton icon={CalendarDays} label="Routine" onClick={() => setToast("Routine management is outside this HR prototype.")} active={false} />
-        </nav>
-        <div className="sidebar-bottom">
-          <div className="help-card"><div className="help-icon"><ShieldCheck size={18} /></div><strong>Finance made clear</strong><p>Track staff balances and institute borrowing in one place.</p></div>
-          <div className="sidebar-user">
-            <div className="avatar avatar-green">TA</div>
-            <div className="sidebar-user-copy"><strong>Tanvir Ahmed</strong><span>Super admin</span></div>
-            <ChevronDown size={15} className="user-chevron" />
+
+        {NAV_GROUPS.map((group) => (
+          <div key={group.id} className="nav-group">
+            <button className="nav-group-header" onClick={() => toggleGroup(group.id)}>
+              <span className="nav-group-title"><group.icon size={15} />{group.label}</span>
+              <ChevronDown size={14} className={expandedGroups[group.id] ? "rotated" : ""} />
+            </button>
+            <div className={`nav-group-items ${expandedGroups[group.id] ? "expanded" : "collapsed"}`}>
+              {group.items.map((item) => (
+                <button key={item.id} className={`nav-item ${isActive(item.id) ? "active" : ""}`} onClick={() => { setActiveView(item.id); setMobileMenuOpen(false); }}>
+                  <span>{item.label}</span>
+                  {item.badge ? <span className="nav-badge">{item.badge}</span> : null}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+
+        <div className="sidebar-footer">
+          <div className="mini-note">
+            <ShieldCheck size={18} />
+            <div>
+              <strong>Priority notices</strong>
+              <span>3 pending approval items</span>
+            </div>
+          </div>
+          <div className="sidebar-user-row">
+            <div className="avatar">TA</div>
+            <div>
+              <strong>Tanvir Ahmed</strong>
+              <span>Super Admin</span>
+            </div>
+            <ChevronDown size={15} />
           </div>
         </div>
       </aside>
 
       <main className="main-area">
         <header className="topbar">
-          <button className="icon-button menu-button" aria-label="Open navigation" onClick={() => setMobileMenuOpen(true)}><Menu size={20} /></button>
-          <div className="breadcrumb">HR &amp; Payroll <span>/</span> <strong>{pageTitle}</strong></div>
-          <div className="topbar-actions">
-            <label className="global-search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search staff..." /></label>
-            <button className="icon-button notification-button" aria-label="Notifications"><Bell size={18} /><i /></button>
-            <div className="top-user"><div className="avatar avatar-green">TA</div><div><strong>Tanvir Ahmed</strong><span>Administrator</span></div><ChevronDown size={15} /></div>
+          <div className="header-left">
+            <button className="menu-button" onClick={() => setMobileMenuOpen(true)}><Menu size={18} /></button>
+            <div className="crumbs">
+              <span className="crumb-muted">Home</span>
+              <span>/</span>
+              <strong>{NAV_GROUPS.flatMap((group) => group.items).find((item) => item.id === activeView)?.label ?? "Dashboard"}</strong>
+            </div>
+          </div>
+
+          <div className="header-controls">
+            <label className="global-search">
+              <Search size={16} />
+              <input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search students, staff, pages" />
+            </label>
+            <button className="icon-button" aria-label="Notifications"><Bell size={18} /><span className="notification-dot" /></button>
+            <div className="user-pill">
+              <div className="avatar">TA</div>
+              <div>
+                <strong>Tanvir Ahmed</strong>
+                <span>Administrator</span>
+              </div>
+            </div>
           </div>
         </header>
 
         <div className="page-content">
-          <div className="page-heading">
-            <div><div className="eyebrow">HUMAN RESOURCES</div><h1>{pageTitle}</h1><p>Manage your people and keep every record in order.</p></div>
-            <div className="heading-date"><CalendarDays size={16} /><span>{new Intl.DateTimeFormat("en", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date())}</span></div>
-          </div>
-
-          <section className="stat-grid" aria-label="HR summary">
-            <StatCard label="Total staff" value={String(STAFF.length).padStart(2, "0")} note="Across all departments" icon={UsersRound} tone="green" />
-            <StatCard label="Present on date" value={String(presentCount).padStart(2, "0")} note="Attendance recorded" icon={Check} tone="mint" />
-            <StatCard label="Staff loan balance" value={money(totalStaffOutstanding)} note={`${activeStaffLoans.length} active staff records`} icon={Wallet} tone="gold" />
-            <StatCard label="Institute loan balance" value={money(totalInstituteOutstanding)} note={`${store.instituteLoans.length} investment records`} icon={Landmark} tone="blue" />
-          </section>
-
-          {section === "attendance" && (
-            <AttendancePage
-              store={store}
-              staff={filteredStaff}
-              attendanceDate={attendanceDate}
-              setAttendanceDate={setAttendanceDate}
-              autoLeave={autoLeave}
-              setAutoLeave={setAutoLeave}
-              presentCount={presentCount}
-              absentCount={absentCount}
-              leaveCount={leaveCount}
-              onMark={markAttendance}
-              onAddLeave={() => openModal("leave")}
-            />
+          {activeView === "dashboard" && (
+            <DashboardScreen stats={stats} students={filteredStudents} donations={donations.slice(0, 3)} notices={notices.slice(0, 2)} printAction={printMode} />
           )}
-          {section === "staffLoans" && (
-            <StaffLoansPage
-              store={store}
-              staff={filteredStaff}
-              loans={store.staffLoans}
-              onAdd={() => openModal("staff-loan")}
-              onRepay={(id) => openModal("staff-payment", id)}
-            />
-          )}
-          {section === "instituteLoans" && (
-            <InstituteLoansPage
-              loans={store.instituteLoans}
-              onAdd={() => openModal("institute-loan")}
-              onRepay={(id) => openModal("institute-payment", id)}
+
+          {activeView === "students" && (
+            <StudentsScreen
+              students={filteredStudents}
+              parents={parents}
+              onOpenStudent={openStudentForm}
+              onSelect={setSelectedStudentId}
+              selectedStudentId={selectedStudentId}
+              exportCsv={() => {}}
             />
           )}
 
-          <footer className="page-footer"><span>Darul Ilm Management</span><span>HR &amp; Payroll <b>·</b> Local demo data is saved in this browser</span></footer>
+          {activeView === "users" && <UsersScreen users={users} />}
+          {activeView === "reports" && <ReportsScreen students={students} donations={donations} printAction={printMode} />}
+          {activeView === "fees" && <FeesScreen students={students} invoices={invoices} printAction={printMode} />}
+          {activeView === "donations" && <DonationsScreen donations={donations} />}
+          {activeView === "idcards" && (
+            <IDCardDesignerScreen
+              students={students}
+              selectedIdCards={selectedIdCards}
+              toggleIdCard={toggleIdCard}
+              template={template}
+              setTemplate={applyTemplate}
+              customTemplateUrl={customTemplateUrl}
+              onUpload={handleFileUpload}
+              batchPrint={batchPrintIdCards}
+            />
+          )}
+
+          {activeView === "settings" && (
+            <SettingsScreen theme={theme} onThemeChange={handleThemeChange} onPresetSelect={(preset) => setTheme(themePresets[preset])} onExport={exportBackup} onRestoreInputClick={() => inputRef.current?.click()} />
+          )}
+
+          {activeView === "backup" && <BackupScreen exportBackup={exportBackup} restoreBackup={restoreBackup} inputRef={inputRef} />}
+
+          {activeView !== "dashboard" && activeView !== "students" && activeView !== "users" && activeView !== "reports" && activeView !== "fees" && activeView !== "donations" && activeView !== "settings" && activeView !== "backup" && activeView !== "idcards" && activeView !== "notices" && (
+            <PlaceholderScreen title={NAV_GROUPS.flatMap((group) => group.items).find((item) => item.id === activeView)?.label ?? "Module"} />
+          )}
         </div>
       </main>
 
-      {modal && (
-        <Modal title={modalTitle(modal)} onClose={closeModal}>
-          {modal === "leave" && <form className="form-grid" onSubmit={saveLeave}>
-            <Field label="Staff member"><select name="staffId" required defaultValue=""><option value="" disabled>Select staff</option>{STAFF.map((person) => <option key={person.id} value={person.id}>{person.name} · {person.id}</option>)}</select></Field>
-            <div className="form-row"><Field label="From"><input type="date" name="startDate" required defaultValue={localDate()} /></Field><Field label="Until"><input type="date" name="endDate" required defaultValue={localDate()} /></Field></div>
-            <Field label="Reason"><input name="reason" required placeholder="e.g. Medical leave" /></Field>
-            <p className="form-hint full-span">This records an approved leave. Attendance will automatically show “On Leave” for these dates when auto-mark is on.</p>
-            <FormActions onCancel={closeModal} submitLabel="Save approved leave" />
-          </form>}
-          {modal === "staff-loan" && <form className="form-grid" onSubmit={saveStaffLoan}>
-            <Field label="Staff member"><select name="staffId" required defaultValue=""><option value="" disabled>Select staff</option>{STAFF.map((person) => <option key={person.id} value={person.id}>{person.name} · {person.id}</option>)}</select></Field>
-            <Field label="Record type"><select name="kind" defaultValue="Advance"><option>Advance</option><option>Staff loan</option></select></Field>
-            <div className="form-row"><Field label="Amount (BDT)"><input type="number" name="amount" min="1" step="1" required placeholder="0" /></Field><Field label="Monthly deduction (BDT)"><input type="number" name="monthlyDeduction" min="0" step="1" required defaultValue="0" /></Field></div>
-            <Field label="Issue date"><input type="date" name="issueDate" required defaultValue={localDate()} /></Field>
-            <Field label="Note"><input name="note" placeholder="Optional details" /></Field>
-            <p className="form-hint full-span">Monthly deduction is a reference for payroll; it does not automatically change payslips.</p>
-            <FormActions onCancel={closeModal} submitLabel="Save record" />
-          </form>}
-          {modal === "staff-payment" && <RepaymentForm
-            label="Repayment amount (BDT)"
-            max={Math.max(0, (store.staffLoans.find((loan) => loan.id === selectedId)?.amount ?? 0) - (store.staffLoans.find((loan) => loan.id === selectedId)?.repaid ?? 0))}
-            onCancel={closeModal}
-            onSubmit={repayStaffLoan}
-          />}
-          {modal === "institute-loan" && <form className="form-grid" onSubmit={saveInstituteLoan}>
-            <Field label="Lender"><input name="lender" required placeholder="Bank, fund or lender" /></Field>
-            <Field label="Investment purpose"><input name="purpose" required placeholder="e.g. Campus expansion" /></Field>
-            <div className="form-row"><Field label="Principal (BDT)"><input type="number" name="principal" min="1" step="1" required placeholder="0" /></Field><Field label="Annual interest (%)"><input type="number" name="interestRate" min="0" step="0.01" required defaultValue="0" /></Field></div>
-            <div className="form-row"><Field label="Term (months)"><input type="number" name="termMonths" min="1" step="1" required placeholder="36" /></Field><Field label="Start date"><input type="date" name="startDate" required defaultValue={localDate()} /></Field></div>
-            <p className="form-hint full-span">Track principal and interest payments separately. The displayed outstanding balance is principal only.</p>
-            <FormActions onCancel={closeModal} submitLabel="Add institute loan" />
-          </form>}
-          {modal === "institute-payment" && <InstitutePaymentForm
-            maxPrincipal={Math.max(0, (store.instituteLoans.find((loan) => loan.id === selectedId)?.principal ?? 0) - (store.instituteLoans.find((loan) => loan.id === selectedId)?.principalRepaid ?? 0))}
-            onCancel={closeModal}
-            onSubmit={repayInstituteLoan}
-          />}
-        </Modal>
+      {showStudentModal && (
+        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && setShowStudentModal(false)}>
+          <div className="modal-window">
+            <div className="modal-header">
+              <div>
+                <span className="eyebrow">Student record</span>
+                <h3>{studentForm.id ? "Edit student" : "New student"}</h3>
+              </div>
+              <button className="icon-button" onClick={() => setShowStudentModal(false)}><X size={18} /></button>
+            </div>
+
+            <form className="student-form" onSubmit={saveStudent}>
+              <div className="form-grid two-col">
+                <label className="field"><span>ID</span><input value={studentForm.id} onChange={(event) => setStudentForm((current) => ({ ...current, id: event.target.value }))} readOnly /></label>
+                <label className="field"><span>Student name</span><input value={studentForm.name} onChange={(event) => setStudentForm((current) => ({ ...current, name: event.target.value }))} placeholder="Student name" required /></label>
+                <label className="field"><span>Class</span><select value={studentForm.className} onChange={(event) => setStudentForm((current) => ({ ...current, className: event.target.value, fee: classFeeMap[event.target.value] ?? current.fee }))}><option>Play</option><option>Nursery</option><option>One</option><option>Two</option><option>Three</option></select></label>
+                <label className="field"><span>Section</span><select value={studentForm.section} onChange={(event) => setStudentForm((current) => ({ ...current, section: event.target.value }))}><option>A</option><option>B</option><option>C</option></select></label>
+                <label className="field"><span>Gender</span><select value={studentForm.gender} onChange={(event) => setStudentForm((current) => ({ ...current, gender: event.target.value as Student["gender"] }))}><option>Male</option><option>Female</option></select></label>
+                <label className="field"><span>Roll</span><input type="number" value={studentForm.roll} onChange={(event) => setStudentForm((current) => ({ ...current, roll: Number(event.target.value) }))} /></label>
+                <label className="field"><span>Phone</span><input value={studentForm.phone} onChange={(event) => setStudentForm((current) => ({ ...current, phone: event.target.value }))} placeholder="01XXXXXXXXX" required /></label>
+                <label className="field"><span>Status</span><select value={studentForm.status} onChange={(event) => setStudentForm((current) => ({ ...current, status: event.target.value as Student["status"] }))}><option>Active</option><option>Inactive</option><option>Graduated</option></select></label>
+                <label className="field"><span>Parent account</span><select value={studentForm.parentId} onChange={(event) => setStudentForm((current) => ({ ...current, parentId: event.target.value }))}>{parents.map((parent) => <option key={parent.id} value={parent.id}>{parent.name} ({parent.relation})</option>)}</select></label>
+                <label className="field"><span>Monthly fee</span><input type="number" value={studentForm.fee} onChange={(event) => setStudentForm((current) => ({ ...current, fee: Number(event.target.value) }))} /></label>
+                <label className="field"><span>Due</span><input type="number" value={studentForm.due} onChange={(event) => setStudentForm((current) => ({ ...current, due: Number(event.target.value) }))} /></label>
+              </div>
+              <div className="form-actions-row">
+                <button type="button" className="button secondary" onClick={() => setShowStudentModal(false)}>Cancel</button>
+                <button type="submit" className="button primary">Save student</button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
-      {toast && <div className="toast" role="status"><Check size={17} />{toast}<button aria-label="Dismiss notification" onClick={() => setToast("")}><X size={15} /></button></div>}
+
+      {printDoc && (
+        <div className="print-document-overlay">
+          <div className="print-document-layer">
+            {printDoc === "receipt" && <PrintableReceipt student={student} />}
+            {printDoc === "invoice" && <PrintableInvoice invoice={invoices[0]} student={student} />}
+            {printDoc === "report" && <PrintableReport students={students} donations={donations} />}
+          </div>
+        </div>
+      )}
+
+      <input ref={inputRef} type="file" accept="application/json" className="hidden-input" onChange={restoreBackup} />
     </div>
   );
 }
 
-function NavButton({ icon: Icon, label, active, onClick }: { icon: IconType; label: string; active: boolean; onClick: () => void }) {
-  return <button className={`nav-item ${active ? "nav-item-active" : ""}`} onClick={onClick}><Icon size={18} strokeWidth={1.8} /><span>{label}</span>{active && <span className="nav-active-mark" />}</button>;
-}
-
-function StatCard({ label, value, note, icon: Icon, tone }: { label: string; value: string; note: string; icon: IconType; tone: string }) {
-  return <article className="stat-card"><div className={`stat-icon ${tone}`}><Icon size={19} strokeWidth={1.9} /></div><div className="stat-label">{label}</div><strong className="stat-value">{value}</strong><div className="stat-note">{note}</div></article>;
-}
-
-function AttendancePage({
-  store,
-  staff,
-  attendanceDate,
-  setAttendanceDate,
-  autoLeave,
-  setAutoLeave,
-  presentCount,
-  absentCount,
-  leaveCount,
-  onMark,
-  onAddLeave,
-}: {
-  store: Store;
-  staff: Staff[];
-  attendanceDate: string;
-  setAttendanceDate: (value: string) => void;
-  autoLeave: boolean;
-  setAutoLeave: (value: boolean) => void;
-  presentCount: number;
-  absentCount: number;
-  leaveCount: number;
-  onMark: (staffId: string, status: "Present" | "Absent") => void;
-  onAddLeave: () => void;
+function DashboardScreen({ stats, students, donations, notices, printAction }: {
+  stats: { totalStudents: number; active: number; due: number; donors: number; staffCount: number; };
+  students: Student[];
+  donations: Donation[];
+  notices: Notice[];
+  printAction: (kind: "receipt" | "report" | "invoice") => void;
 }) {
-  return <section className="panel">
-    <div className="panel-heading">
-      <div><h2>Daily register</h2><p>Mark attendance for each staff member.</p></div>
-      <div className="panel-actions"><label className="date-picker"><CalendarDays size={16} /><input type="date" max={localDate()} value={attendanceDate} onChange={(event) => setAttendanceDate(event.target.value)} /></label><button className="button button-outline" onClick={onAddLeave}><Plus size={16} />Approved leave</button></div>
+  return (
+    <>
+      <section className="hero-banner">
+        <div>
+          <span className="eyebrow">Institute overview</span>
+          <h1>Tanzeemul Huda</h1>
+          <p>Pre Hifz and Noori Madrasa management dashboard.</p>
+        </div>
+        <div className="hero-meta">
+          <span>11 Nov 2025</span>
+          <span>Alhamdulillah</span>
+        </div>
+      </section>
+
+      <div className="stat-grid-metric">
+        <MetricCard icon={<UsersRound size={18} />} label="Total students" value={String(stats.totalStudents)} tone="green" />
+        <MetricCard icon={<Check size={18} />} label="Active students" value={String(stats.active)} tone="mint" />
+        <MetricCard icon={<Wallet size={18} />} label="Fee due" value={formatBDT(stats.due)} tone="gold" />
+        <MetricCard icon={<HandCoins size={18} />} label="Donors" value={String(stats.donors)} tone="blue" />
+        <MetricCard icon={<ShieldCheck size={18} />} label="Staff" value={String(stats.staffCount)} tone="blue" />
+      </div>
+
+      <div className="content-grid">
+        <div className="panel-block">
+          <div className="section-head">
+            <div>
+              <h3>Recent student status</h3>
+              <span>Performance snapshot</span>
+            </div>
+            <button className="button secondary" onClick={() => printAction("report")}>Print report</button>
+          </div>
+          <div className="bar-chart">
+            {[60, 75, 58, 92, 76, 88].map((value, index) => (
+              <div key={index} className="bar-stack" title={`${value}%`}>
+                <div className="bar-fill" style={{ height: `${value}%` }} />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel-block">
+          <div className="section-head">
+            <div>
+              <h3>Recent donations</h3>
+              <span>Latest fund activity</span>
+            </div>
+          </div>
+          <ul className="list-simple">
+            {donations.map((donation) => (
+              <li key={donation.id}>
+                <div>
+                  <strong>{donation.donor}</strong>
+                  <small>{donation.fund}</small>
+                </div>
+                <span>{formatBDT(donation.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      <div className="content-grid two-cols">
+        <div className="panel-block">
+          <div className="section-head">
+            <div>
+              <h3>Students</h3>
+              <span>Latest learners</span>
+            </div>
+          </div>
+          <ul className="student-list">
+            {students.slice(0, 5).map((student) => (
+              <li key={student.id}>
+                <div className="avatar small">{student.photo}</div>
+                <div>
+                  <strong>{student.name}</strong>
+                  <small>{student.className} · {student.section}</small>
+                </div>
+                <span className={`status-pill ${student.status === "Active" ? "success" : student.status === "Inactive" ? "warning" : "neutral"}`}>{student.status}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="panel-block">
+          <div className="section-head">
+            <div>
+              <h3>Notice board</h3>
+              <span>Heads-up and updates</span>
+            </div>
+          </div>
+          <ul className="notice-list">
+            {notices.map((notice) => (
+              <li key={notice.id}>
+                <span className="notice-tag">{notice.type}</span>
+                <div>
+                  <strong>{notice.title}</strong>
+                  <small>{safeDate(notice.date)}</small>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function StudentsScreen({ students, parents, onOpenStudent, onSelect, selectedStudentId, exportCsv }: { students: Student[]; parents: ParentRecord[]; onOpenStudent: (item?: Student) => void; onSelect: (id: string) => void; selectedStudentId: string; exportCsv: () => void; }) {
+  return (
+    <>
+      <div className="page-header-row">
+        <div>
+          <span className="eyebrow">Academic management</span>
+          <h2>Students</h2>
+        </div>
+        <div className="header-actions">
+          <button className="button secondary" onClick={() => onOpenStudent()}>Add student</button>
+          <button className="button primary" onClick={() => exportCsv()}>Export CSV</button>
+        </div>
+      </div>
+
+      <div className="panel-block">
+        <div className="filters-row">
+          <label className="field search-field"><Search size={15} /><input placeholder="Search name, ID or phone" /></label>
+          <select className="field-select"><option>All classes</option><option>Play</option><option>Nursery</option><option>One</option><option>Two</option><option>Three</option></select>
+          <select className="field-select"><option>Active</option><option>Inactive</option></select>
+          <button className="button secondary">Reset</button>
+        </div>
+
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>ID</th>
+              <th>Class</th>
+              <th>Section</th>
+              <th>Parent</th>
+              <th>Fee due</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {students.map((student) => (
+              <tr key={student.id} className={student.id === selectedStudentId ? "selected-row" : ""} onClick={() => onSelect(student.id)}>
+                <td>
+                  <div className="person-chip"><div className="avatar small">{student.photo}</div><div><strong>{student.name}</strong><small>{student.phone}</small></div></div>
+                </td>
+                <td>{student.id}</td>
+                <td>{student.className}</td>
+                <td>{student.section}</td>
+                <td>{parents.find((parent) => parent.id === student.parentId)?.name ?? "—"}</td>
+                <td>{formatBDT(student.due)}</td>
+                <td><span className={`status-pill ${student.status === "Active" ? "success" : student.status === "Inactive" ? "warning" : "neutral"}`}>{student.status}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+function UsersScreen({ users }: { users: UserAccount[] }) {
+  return (
+    <>
+      <div className="page-header-row">
+        <div>
+          <span className="eyebrow">Administration</span>
+          <h2>User management</h2>
+        </div>
+      </div>
+      <div className="panel-block">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>Last login</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((user) => (
+              <tr key={user.id}>
+                <td><div className="person-chip"><div className="avatar small">{user.name.split(" ").map((part) => part[0]).slice(0,2).join("").toUpperCase()}</div><div><strong>{user.name}</strong><small>{user.id}</small></div></div></td>
+                <td><span className="tag soft">{user.role}</span></td>
+                <td><span className={`status-pill ${user.status === "Active" ? "success" : "warning"}`}>{user.status}</span></td>
+                <td>{user.lastLogin}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="role-grid panel-block">
+        <div className="section-head"><div><h3>Role permissions</h3><span>View / Create / Edit / Delete</span></div></div>
+        <div className="permission-table">
+          {['Dashboard','Students','Fees','Donations','Reports','Settings'].map((module) => (
+            <div key={module} className="permission-row">
+              <span>{module}</span>
+              <label><input type="checkbox" defaultChecked /> <small>View</small></label>
+              <label><input type="checkbox" defaultChecked /> <small>Create</small></label>
+              <label><input type="checkbox" defaultChecked /> <small>Edit</small></label>
+              <label><input type="checkbox" /> <small>Delete</small></label>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ReportsScreen({ students, donations, printAction }: { students: Student[]; donations: Donation[]; printAction: (kind: "receipt" | "report" | "invoice") => void }) {
+  const feeDueTotal = students.reduce((sum, student) => sum + student.due, 0);
+  return (
+    <>
+      <div className="page-header-row">
+        <div>
+          <span className="eyebrow">Reports</span>
+          <h2>Academic and financial summary</h2>
+        </div>
+        <button className="button primary" onClick={() => printAction("report")}>Print report</button>
+      </div>
+
+      <div className="stat-grid-metric narrow">
+        <MetricCard icon={<UsersRound size={18} />} label="Students" value={String(students.length)} tone="green" />
+        <MetricCard icon={<Wallet size={18} />} label="Receivables" value={formatBDT(feeDueTotal)} tone="gold" />
+        <MetricCard icon={<HandCoins size={18} />} label="Donations" value={formatBDT(donations.reduce((sum, item) => sum + item.amount, 0))} tone="blue" />
+        <MetricCard icon={<FileText size={18} />} label="Classrooms" value="06" tone="mint" />
+      </div>
+
+      <div className="panel-block report-panel">
+        <div className="report-header">
+          <div>
+            <strong>تَنْزِيمُ الحُدَا</strong>
+            <span>প্রিহিফজ ও নূরানী একাডেমী</span>
+            <small>18 Main Road, Chawkbazar, Chattogram</small>
+          </div>
+          <div className="report-meta">
+            <span>Period: Nov 2025</span>
+            <span>Prepared on: 11 Nov 2025</span>
+          </div>
+        </div>
+        <table className="data-table mini-table">
+          <thead>
+            <tr>
+              <th>Department</th>
+              <th>Students</th>
+              <th>Fees collected</th>
+              <th>Due</th>
+            </tr>
+          </thead>
+          <tbody>
+            {['Play','Nursery','One','Two','Three'].map((className) => {
+              const list = students.filter((student) => student.className === className);
+              const due = list.reduce((sum, student) => sum + student.due, 0);
+              return <tr key={className}><td>{className}</td><td>{list.length}</td><td>{formatBDT(list.reduce((sum, student) => sum + (student.fee - student.due), 0))}</td><td>{formatBDT(due)}</td></tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+function FeesScreen({ students, invoices, printAction }: { students: Student[]; invoices: Invoice[]; printAction: (kind: "receipt" | "report" | "invoice") => void }) {
+  return (
+    <>
+      <div className="page-header-row">
+        <div>
+          <span className="eyebrow">Accounting</span>
+          <h2>Fee collection and invoices</h2>
+        </div>
+        <button className="button primary" onClick={() => printAction("invoice")}>Print invoice</button>
+      </div>
+
+      <div className="panel-block">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Student</th>
+              <th>Month</th>
+              <th>Due</th>
+              <th>Paid</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {invoices.map((invoice) => {
+              const student = students.find((entry) => entry.id === invoice.studentId);
+              return <tr key={invoice.id}><td>{student?.name ?? invoice.studentId}</td><td>{invoice.month}</td><td>{formatBDT(invoice.due)}</td><td>{formatBDT(invoice.paid)}</td><td><span className={`status-pill ${invoice.status === "Paid" ? "success" : invoice.status === "Partial" ? "warning" : "neutral"}`}>{invoice.status}</span></td></tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+function DonationsScreen({ donations }: { donations: Donation[] }) {
+  return (
+    <>
+      <div className="page-header-row">
+        <div>
+          <span className="eyebrow">Accounting</span>
+          <h2>Donations and funds</h2>
+        </div>
+      </div>
+      <div className="panel-block">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Donor</th>
+              <th>Fund</th>
+              <th>Amount</th>
+              <th>Method</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {donations.map((donation) => (
+              <tr key={donation.id}>
+                <td>{donation.donor}</td>
+                <td><span className="tag soft">{donation.fund}</span></td>
+                <td>{formatBDT(donation.amount)}</td>
+                <td>{donation.method}</td>
+                <td>{safeDate(donation.date)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+function IDCardDesignerScreen({ students, selectedIdCards, toggleIdCard, template, setTemplate, customTemplateUrl, onUpload, batchPrint }: {
+  students: Student[];
+  selectedIdCards: string[];
+  toggleIdCard: (id: string) => void;
+  template: string;
+  setTemplate: (selected: string) => void;
+  customTemplateUrl: string;
+  onUpload: (event: ChangeEvent<HTMLInputElement>) => void;
+  batchPrint: () => void;
+}) {
+  return (
+    <>
+      <div className="page-header-row">
+        <div>
+          <span className="eyebrow">Academic records</span>
+          <h2>ID card designer</h2>
+        </div>
+        <div className="header-actions">
+          <button className="button secondary" onClick={batchPrint}>Bulk save & print</button>
+        </div>
+      </div>
+
+      <div className="idcard-layout">
+        <div className="panel-block form-panel">
+          <div className="section-head">
+            <div>
+              <h3>Card styles</h3>
+              <span>Choose a preset or upload your own</span>
+            </div>
+          </div>
+          <div className="template-row">
+            {templateOptions.map((option) => (
+              <button key={option.id} className={`template-option ${template === option.id ? "active" : ""}`} onClick={() => setTemplate(option.id)}>
+                <span className="template-swatch" style={{ background: option.accent }} />
+                {option.name}
+              </button>
+            ))}
+          </div>
+          <div className="upload-box">
+            <Upload size={18} />
+            <label className="upload-cell">
+              <span>Upload custom design</span>
+              <input type="file" accept="image/*" onChange={onUpload} />
+            </label>
+          </div>
+          {customTemplateUrl && <img src={customTemplateUrl} alt="Custom card template preview" className="uploaded-template" />}
+
+          <div className="students-select-list">
+            {students.map((student) => (
+              <label key={student.id} className="check-option">
+                <input type="checkbox" checked={selectedIdCards.includes(student.id)} onChange={() => toggleIdCard(student.id)} />
+                <span>{student.name}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel-block preview-panel">
+          <div className="id-card-preview">
+            <div className="card-shell">
+              <div className="card-header">
+                <div className="card-brand">
+                  <div className="arabic-calligraphy">تَنْزِيمُ الحُدَا</div>
+                  <strong>Tanzeemul Huda</strong>
+                  <small>Pre Hifz & Noorani Academy</small>
+                </div>
+              </div>
+              <div className="card-identity">
+                <div className="avatar large">{students[0]?.photo ?? "TH"}</div>
+                <div>
+                  <h4>{students[0]?.name ?? "Student"}</h4>
+                  <p>Class: {students[0]?.className ?? "One"}</p>
+                  <p>ID: {students[0]?.id ?? "THM-2025-001"}</p>
+                </div>
+              </div>
+              <div className="card-details">
+                <span>Blood Group: O+</span>
+                <span>Valid: 2025-2026</span>
+                <span>Guardian: Rahman Ali</span>
+              </div>
+              <div className="qr-box" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function SettingsScreen({ theme, onThemeChange, onPresetSelect, onExport, onRestoreInputClick }: {
+  theme: ThemeConfig;
+  onThemeChange: (key: keyof ThemeConfig, value: string) => void;
+  onPresetSelect: (preset: "emerald" | "royal" | "sunset") => void;
+  onExport: () => void;
+  onRestoreInputClick: () => void;
+}) {
+  return (
+    <>
+      <div className="page-header-row">
+        <div>
+          <span className="eyebrow">Administration</span>
+          <h2>Theme and system settings</h2>
+        </div>
+      </div>
+
+      <div className="settings-grid">
+        <div className="panel-block">
+          <div className="section-head"><div><h3>Colour palette</h3><span>Editable theme</span></div></div>
+          <div className="color-picker-grid">
+            {Object.entries(theme).map(([key, value]) => (
+              <label key={key} className="color-field">
+                <span>{key}</span>
+                <div className="color-input-wrap">
+                  <input type="color" value={value} onChange={(event) => onThemeChange(key as keyof ThemeConfig, event.target.value)} />
+                  <strong>{value}</strong>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel-block">
+          <div className="section-head"><div><h3>Quick presets</h3><span>Brand looks</span></div></div>
+          <div className="preset-list">
+            {Object.entries(themePresets).map(([key, preset]) => (
+              <button key={key} className="preset-button" onClick={() => onPresetSelect(key as "emerald" | "royal" | "sunset")}>
+                <span className="swatch-group"><span style={{ background: preset.primary }} /><span style={{ background: preset.secondary }} /><span style={{ background: preset.accent }} /></span>
+                {key.charAt(0).toUpperCase() + key.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="panel-block backup-box">
+        <div className="section-head"><div><h3>Backup and restore</h3><span>Secure local system snapshot</span></div></div>
+        <div className="backup-actions">
+          <button className="button primary" onClick={onExport}><Download size={16} />Export backup</button>
+          <button className="button secondary" onClick={onRestoreInputClick}><Upload size={16} />Restore backup</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function BackupScreen({ exportBackup, restoreBackup, inputRef }: { exportBackup: () => void; restoreBackup: (event: ChangeEvent<HTMLInputElement>) => void; inputRef: React.RefObject<HTMLInputElement>; }) {
+  return (
+    <div className="panel-block backup-full">
+      <div className="section-head">
+        <div>
+          <h3>Backup & restore</h3>
+          <span>Keep a system snapshot for the madrasa office</span>
+        </div>
+      </div>
+      <div className="backup-actions">
+        <button className="button primary" onClick={exportBackup}><Download size={16} />Download backup</button>
+        <button className="button secondary" onClick={() => inputRef.current?.click()}><Upload size={16} />Restore from file</button>
+      </div>
+      <input ref={inputRef} type="file" accept="application/json" className="hidden-input" onChange={restoreBackup} />
     </div>
-    <div className="attendance-controls">
-      <div className="attendance-date-label"><span className="date-dot" /><span>Showing register for <strong>{formatDate(attendanceDate)}</strong></span></div>
-      <label className="toggle-control"><span><strong>Auto-mark approved leave</strong><small>Approved leave dates become “On Leave”</small></span><input type="checkbox" checked={autoLeave} onChange={(event) => setAutoLeave(event.target.checked)} /><span className="toggle-track" /></label>
+  );
+}
+
+function PlaceholderScreen({ title }: { title: string }) {
+  return <div className="panel-block empty-panel"><h3>{title}</h3><p>Advanced module features are included in the management dashboard suite.</p></div>;
+}
+
+function MetricCard({ icon, label, value, tone }: { icon: ReactNode; label: string; value: string; tone: "green" | "mint" | "gold" | "blue" }) {
+  return <div className={`metric-card ${tone}`}><div className="metric-icon">{icon}</div><div><span>{label}</span><strong>{value}</strong></div></div>;
+}
+
+function PrintableReceipt({ student }: { student: Student | undefined }) {
+  return (
+    <div className="print-sheet receipt-block">
+      <div className="office-header">
+        <div>
+          <div className="arabic-calligraphy">تَنْزِيمُ الحُدَا</div>
+          <strong>Tanzeemul Huda</strong>
+          <span>প্রিহিফজ ও নূরানী একাডেমী</span>
+          <small>18 Main Road, Chawkbazar, Chattogram</small>
+        </div>
+      </div>
+      <div className="receipt-title-row"><h3>Fee Receipt</h3><span>Receipt #F-2025-111</span></div>
+      <div className="receipt-grid">
+        <div><strong>Student</strong><span>{student?.name ?? "Student name"}</span></div>
+        <div><strong>Class</strong><span>{student?.className ?? "One"}</span></div>
+        <div><strong>Amount</strong><span>{formatBDT(student?.fee ?? 3500)}</span></div>
+        <div><strong>Amount in words</strong><span>Three thousand five hundred taka only</span></div>
+      </div>
+      <div className="signature-row"><div><span>Receiver</span><strong>________________</strong></div><div><span>Authorized</span><strong>________________</strong></div></div>
     </div>
-    <div className="attendance-summary">
-      <span className="summary-present"><i />{presentCount} Present</span><span className="summary-absent"><i />{absentCount} Absent</span><span className="summary-leave"><i />{leaveCount} On leave</span>
-      <span className="summary-total">{presentCount + absentCount + leaveCount} staff total</span>
+  );
+}
+
+function PrintableInvoice({ invoice, student }: { invoice: Invoice | undefined; student: Student | undefined }) {
+  return (
+    <div className="print-sheet invoice-block">
+      <div className="office-header">
+        <div>
+          <div className="arabic-calligraphy">تَنْزِيمُ الحُدَا</div>
+          <strong>Tanzeemul Huda</strong>
+          <span>প্রিহিফজ ও নূরানী একাডেমী</span>
+          <small>18 Main Road, Chawkbazar, Chattogram</small>
+        </div>
+      </div>
+      <div className="receipt-title-row"><h3>Invoice</h3><span>{invoice?.id ?? "INV-2025-001"}</span></div>
+      <div className="receipt-grid">
+        <div><strong>Student</strong><span>{student?.name ?? "Student"}</span></div>
+        <div><strong>Month</strong><span>{invoice?.month ?? "2025-11"}</span></div>
+        <div><strong>Due</strong><span>{formatBDT(invoice?.due ?? 3500)}</span></div>
+        <div><strong>Paid</strong><span>{formatBDT(invoice?.paid ?? 0)}</span></div>
+      </div>
+      <div className="signature-row"><div><span>Collector</span><strong>________________</strong></div><div><span>Finance</span><strong>________________</strong></div></div>
     </div>
-    <div className="table-scroll"><table className="data-table attendance-table">
-      <thead><tr><th>STAFF MEMBER</th><th>DEPARTMENT</th><th>JOINED</th><th>STATUS</th><th className="align-right">MARK ATTENDANCE</th></tr></thead>
-      <tbody>{staff.map((person) => {
-        const status = getStatusForDate(store, person.id, attendanceDate, autoLeave);
-        const isApprovedLeave = autoLeave && store.approvedLeaves.some((leave) => leave.staffId === person.id && leave.startDate <= attendanceDate && leave.endDate >= attendanceDate);
-        return <tr key={person.id}>
-          <td><div className="person-cell"><div className={`avatar avatar-${person.color}`}>{person.initials}</div><div><strong>{person.name}</strong><span>{person.id} · {person.title}</span></div></div></td>
-          <td><span className="department-tag">{person.department}</span></td>
-          <td className="muted-cell">{formatDate(person.joined)}</td>
-          <td><StatusBadge status={status} /><span className="status-note">{isApprovedLeave ? "Approved leave" : status === "Present" ? "Marked today" : status === "Absent" ? "Marked today" : "No attendance"}</span></td>
-          <td><div className="attendance-buttons"><button className={`mark-button present-button ${status === "Present" ? "selected" : ""}`} disabled={isApprovedLeave} onClick={() => onMark(person.id, "Present")}><Check size={15} />Present</button><button className={`mark-button absent-button ${status === "Absent" ? "selected" : ""}`} disabled={isApprovedLeave} onClick={() => onMark(person.id, "Absent")}><X size={15} />Absent</button></div></td>
-        </tr>;
-      })}</tbody>
-    </table>{staff.length === 0 && <EmptyState title="No staff found" detail="Try a different search term." />}</div>
-    <div className="panel-footnote"><ShieldCheck size={15} />Attendance is stored by date. You can review or update a previous day from the date picker.</div>
-  </section>;
+  );
 }
 
-function StaffLoansPage({ store, staff, loans, onAdd, onRepay }: { store: Store; staff: Staff[]; loans: StaffLoan[]; onAdd: () => void; onRepay: (id: string) => void }) {
-  const active = loans.filter((loan) => loan.amount > loan.repaid);
-  const outstanding = active.reduce((sum, loan) => sum + loan.amount - loan.repaid, 0);
-  const totalIssued = loans.reduce((sum, loan) => sum + loan.amount, 0);
-  const totalRepaid = loans.reduce((sum, loan) => sum + loan.repaid, 0);
-  return <section className="panel">
-    <div className="panel-heading">
-      <div><h2>Advances &amp; staff loans</h2><p>Review employee balances and record repayments.</p></div>
-      <button className="button button-primary" onClick={onAdd}><Plus size={17} />New advance or loan</button>
+function PrintableReport({ students, donations }: { students: Student[]; donations: Donation[] }) {
+  const totalDue = students.reduce((sum, student) => sum + student.due, 0);
+  return (
+    <div className="print-sheet report-block">
+      <div className="office-header">
+        <div>
+          <div className="arabic-calligraphy">تَنْزِيمُ الحُدَا</div>
+          <strong>Tanzeemul Huda</strong>
+          <span>প্রিহিফজ ও নূরানী একাডেমী</span>
+          <small>18 Main Road, Chawkbazar, Chattogram</small>
+        </div>
+      </div>
+      <div className="receipt-title-row"><h3>Monthly Academic Report</h3><span>November 2025</span></div>
+      <div className="report-summary-grid">
+        <div><span>Total students</span><strong>{students.length}</strong></div>
+        <div><span>Total fee due</span><strong>{formatBDT(totalDue)}</strong></div>
+        <div><span>Donation</span><strong>{formatBDT(donations.reduce((sum, item) => sum + item.amount, 0))}</strong></div>
+      </div>
+      <table className="print-table">
+        <thead><tr><th>Class</th><th>Students</th><th>Due</th></tr></thead>
+        <tbody>
+          {['Play','Nursery','One','Two','Three'].map((className) => {
+            const list = students.filter((student) => student.className === className);
+            return <tr key={className}><td>{className}</td><td>{list.length}</td><td>{formatBDT(list.reduce((sum, student) => sum + student.due, 0))}</td></tr>;
+          })}
+        </tbody>
+      </table>
+      <div className="signature-row"><div><span>Head Teacher</span><strong>________________</strong></div><div><span>Manager</span><strong>________________</strong></div></div>
     </div>
-    <div className="loan-summary-grid">
-      <MiniMetric label="Total issued" value={money(totalIssued)} icon={ArrowUpRight} />
-      <MiniMetric label="Repaid to date" value={money(totalRepaid)} icon={ArrowDownLeft} />
-      <MiniMetric label="Outstanding" value={money(outstanding)} icon={CircleDollarSign} emphasis />
-      <MiniMetric label="Active records" value={String(active.length)} icon={Clock3} />
-    </div>
-    <div className="section-subheading"><div><h3>Employee balances</h3><span>Open and completed records</span></div><span className="count-pill">{loans.length} records</span></div>
-    <div className="table-scroll"><table className="data-table">
-      <thead><tr><th>EMPLOYEE</th><th>TYPE</th><th>ISSUED</th><th>ORIGINAL AMOUNT</th><th>REPAID</th><th>BALANCE</th><th>PAYROLL DEDUCTION</th><th /></tr></thead>
-      <tbody>{loans.map((loan) => {
-        const person = staff.find((member) => member.id === loan.staffId) ?? STAFF.find((member) => member.id === loan.staffId);
-        const balance = loan.amount - loan.repaid;
-        return <tr key={loan.id}>
-          <td><div className="person-cell compact-person"><div className={`avatar avatar-${person?.color ?? "green"}`}>{person?.initials ?? initials(person?.name ?? "Staff")}</div><div><strong>{person?.name ?? "Unknown staff"}</strong><span>{loan.id} · {person?.id ?? loan.staffId}</span></div></div></td>
-          <td><span className={`type-pill ${loan.kind === "Advance" ? "advance-pill" : "loan-pill"}`}>{loan.kind}</span></td>
-          <td className="muted-cell">{formatDate(loan.issueDate)}</td>
-          <td className="amount-cell">{money(loan.amount)}</td>
-          <td className="muted-cell">{money(loan.repaid)}</td>
-          <td><strong className={balance === 0 ? "amount-paid" : ""}>{money(balance)}</strong></td>
-          <td className="muted-cell">{money(loan.monthlyDeduction)} / mo</td>
-          <td>{balance > 0 && <button className="text-action" onClick={() => onRepay(loan.id)}>Record payment</button>}{balance === 0 && <span className="paid-label"><Check size={14} />Paid</span>}</td>
-        </tr>;
-      })}</tbody>
-    </table>{loans.length === 0 && <EmptyState title="No advance or loan records" detail="Add a record to start tracking employee balances." />}</div>
-    <div className="note-banner"><HandCoins size={18} /><div><strong>Payroll deduction is a reference</strong><span>Monthly deduction amounts are recorded for planning; payroll is not changed automatically.</span></div></div>
-    {store.staffLoans.length > 0 && <p className="table-caption">Advances and staff loans are employee receivables. Record repayments as they are collected.</p>}
-  </section>;
-}
-
-function InstituteLoansPage({ loans, onAdd, onRepay }: { loans: InstituteLoan[]; onAdd: () => void; onRepay: (id: string) => void }) {
-  const principal = loans.reduce((sum, loan) => sum + loan.principal, 0);
-  const repaid = loans.reduce((sum, loan) => sum + loan.principalRepaid, 0);
-  const outstanding = principal - repaid;
-  const interestPaid = loans.reduce((sum, loan) => sum + loan.interestPaid, 0);
-  return <section className="panel">
-    <div className="panel-heading">
-      <div><h2>Institute investment loans</h2><p>Track borrowing taken for institute projects and investments.</p></div>
-      <button className="button button-primary" onClick={onAdd}><Plus size={17} />Record institute loan</button>
-    </div>
-    <div className="loan-summary-grid institute-summary">
-      <MiniMetric label="Total borrowed" value={money(principal)} icon={Landmark} />
-      <MiniMetric label="Principal repaid" value={money(repaid)} icon={ArrowDownLeft} />
-      <MiniMetric label="Principal outstanding" value={money(outstanding)} icon={Wallet} emphasis />
-      <MiniMetric label="Interest paid" value={money(interestPaid)} icon={Coins} />
-    </div>
-    <div className="note-banner investment-note"><ShieldCheck size={18} /><div><strong>Investment loan register</strong><span>Principal due and interest paid are tracked separately for clear accounting.</span></div></div>
-    <div className="section-subheading"><div><h3>Borrowing records</h3><span>Institute liabilities by lender</span></div><span className="count-pill">{loans.length} records</span></div>
-    <div className="table-scroll"><table className="data-table institute-table">
-      <thead><tr><th>LENDER / PURPOSE</th><th>START DATE</th><th>TERM</th><th>RATE</th><th>PRINCIPAL</th><th>REPAID</th><th>OUTSTANDING</th><th>INTEREST PAID</th><th /></tr></thead>
-      <tbody>{loans.map((loan) => {
-        const balance = loan.principal - loan.principalRepaid;
-        return <tr key={loan.id}>
-          <td><div className="lender-cell"><div className="lender-icon"><Landmark size={17} /></div><div><strong>{loan.lender}</strong><span>{loan.purpose} · {loan.id}</span></div></div></td>
-          <td className="muted-cell">{formatDate(loan.startDate)}</td>
-          <td>{loan.termMonths} mo</td>
-          <td>{loan.interestRate}%</td>
-          <td>{money(loan.principal)}</td>
-          <td className="muted-cell">{money(loan.principalRepaid)}</td>
-          <td><strong>{money(balance)}</strong></td>
-          <td className="muted-cell">{money(loan.interestPaid)}</td>
-          <td>{balance > 0 && <button className="text-action" onClick={() => onRepay(loan.id)}>Record payment</button>}{balance === 0 && <span className="paid-label"><Check size={14} />Paid</span>}</td>
-        </tr>;
-      })}</tbody>
-    </table>{loans.length === 0 && <EmptyState title="No institute loans recorded" detail="Add a loan when the institute borrows for an investment or project." />}</div>
-    <div className="table-caption">Outstanding shows principal only. Interest paid is tracked separately; this prototype does not calculate an amortization schedule.</div>
-  </section>;
-}
-
-function MiniMetric({ label, value, icon: Icon, emphasis = false }: { label: string; value: string; icon: IconType; emphasis?: boolean }) {
-  return <div className={`mini-metric ${emphasis ? "mini-metric-emphasis" : ""}`}><div className="mini-metric-icon"><Icon size={17} /></div><span>{label}</span><strong>{value}</strong></div>;
-}
-
-function StatusBadge({ status }: { status: AttendanceStatus }) {
-  const className = status === "Present" ? "badge-present" : status === "Absent" ? "badge-absent" : "badge-leave";
-  return <span className={`status-badge ${className}`}><i />{status}</span>;
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return <label className="form-field"><span>{label}</span>{children}</label>;
-}
-
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <div className="modal-heading"><div><span className="modal-kicker">HR &amp; PAYROLL</span><h2 id="modal-title">{title}</h2></div><button className="icon-button" aria-label="Close dialog" onClick={onClose}><X size={19} /></button></div>
-      {children}
-    </section>
-  </div>;
-}
-
-function FormActions({ onCancel, submitLabel }: { onCancel: () => void; submitLabel: string }) {
-  return <div className="form-actions full-span"><button type="button" className="button button-outline" onClick={onCancel}>Cancel</button><button type="submit" className="button button-primary"><Check size={16} />{submitLabel}</button></div>;
-}
-
-function RepaymentForm({ label, max, onCancel, onSubmit }: { label: string; max: number; onCancel: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
-  return <form className="form-grid" onSubmit={onSubmit}><Field label={label}><input type="number" name="amount" min="1" max={max} step="1" required placeholder="0" /></Field><p className="form-hint full-span">Maximum remaining balance: <strong>{money(max)}</strong></p><FormActions onCancel={onCancel} submitLabel="Record repayment" /></form>;
-}
-
-function InstitutePaymentForm({ maxPrincipal, onCancel, onSubmit }: { maxPrincipal: number; onCancel: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
-  return <form className="form-grid" onSubmit={onSubmit}><div className="form-row"><Field label="Principal payment (BDT)"><input type="number" name="principal" min="0" max={maxPrincipal} step="1" required defaultValue="0" /></Field><Field label="Interest payment (BDT)"><input type="number" name="interest" min="0" step="1" required defaultValue="0" /></Field></div><p className="form-hint full-span">Remaining principal: <strong>{money(maxPrincipal)}</strong>. At least one payment amount must be greater than zero.</p><FormActions onCancel={onCancel} submitLabel="Record payment" /></form>;
-}
-
-function EmptyState({ title, detail }: { title: string; detail: string }) {
-  return <div className="empty-state"><div><CreditCard size={22} /></div><strong>{title}</strong><span>{detail}</span></div>;
-}
-
-function modalTitle(kind: Exclude<ModalKind, null>): string {
-  const titles: Record<Exclude<ModalKind, null>, string> = {
-    leave: "Add approved leave",
-    "staff-loan": "New advance or loan",
-    "staff-payment": "Record staff repayment",
-    "institute-loan": "Record institute loan",
-    "institute-payment": "Record loan payment",
-  };
-  return titles[kind];
+  );
 }
 
 export default App;
