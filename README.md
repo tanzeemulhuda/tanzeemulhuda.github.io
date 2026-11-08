@@ -1,4 +1,4 @@
-#Tanzeemul Huda Madrasa HR & Payroll
+# Tanzeemul Huda Madrasa HR & Payroll
 
 A lightweight React and TypeScript prototype for the HR workflows:
 
